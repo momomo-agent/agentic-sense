@@ -296,7 +296,7 @@ export class SenseEngine {
 
   async initMediaPipe() {
     // Import the tasks-vision module
-    const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs')
+    const vision = await import('./mediapipe/vision_bundle.mjs')
     const { FaceLandmarker, FilesetResolver } = vision
 
     // Use self-hosted WASM files
