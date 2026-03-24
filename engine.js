@@ -491,8 +491,91 @@ export class SenseEngine {
   }
 
   drawOverlay(results) {
-    // Clear — no debug overlay in production
-    this.ctx.clearRect(0, 0, this.overlay.width, this.overlay.height)
+    const canvas = this.overlay
+    const ctx = this.ctx
+
+    // Match canvas size to displayed video size (cover fit)
+    const rect = this.video.getBoundingClientRect()
+    if (canvas.width !== rect.width || canvas.height !== rect.height) {
+      canvas.width = rect.width
+      canvas.height = rect.height
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    if (!results.faceLandmarks || results.faceLandmarks.length === 0) return
+
+    // Compute cover transform:
+    // video intrinsic size vs displayed size
+    const vw = this.video.videoWidth
+    const vh = this.video.videoHeight
+    const dw = rect.width
+    const dh = rect.height
+
+    const videoAspect = vw / vh
+    const displayAspect = dw / dh
+
+    let scale, offsetX, offsetY
+    if (videoAspect > displayAspect) {
+      // Video wider — crop sides
+      scale = dh / vh
+      offsetX = (dw - vw * scale) / 2
+      offsetY = 0
+    } else {
+      // Video taller — crop top/bottom
+      scale = dw / vw
+      offsetX = 0
+      offsetY = (dh - vh * scale) / 2
+    }
+
+    // Convert normalized landmark (0-1) to canvas pixel
+    // Also flip X because video is mirrored with scaleX(-1)
+    const toX = (nx) => dw - (nx * vw * scale + offsetX)
+    const toY = (ny) => ny * vh * scale + offsetY
+
+    for (const landmarks of results.faceLandmarks) {
+      // Face oval
+      ctx.strokeStyle = 'rgba(74, 222, 128, 0.35)'
+      ctx.lineWidth = 1.5
+
+      const ovalIndices = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+        397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93,
+        234, 127, 162, 21, 54, 103, 67, 109, 10]
+
+      ctx.beginPath()
+      ctx.moveTo(toX(landmarks[ovalIndices[0]].x), toY(landmarks[ovalIndices[0]].y))
+      for (let i = 1; i < ovalIndices.length; i++) {
+        const p = landmarks[ovalIndices[i]]
+        ctx.lineTo(toX(p.x), toY(p.y))
+      }
+      ctx.stroke()
+
+      // Eye corners
+      ctx.fillStyle = 'rgba(96, 165, 250, 0.7)'
+      for (const i of [33, 133, 362, 263]) {
+        const p = landmarks[i]
+        ctx.beginPath()
+        ctx.arc(toX(p.x), toY(p.y), 2.5, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      // Iris
+      if (landmarks.length >= 478) {
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.85)'
+        for (const i of [468, 473]) {
+          const p = landmarks[i]
+          ctx.beginPath()
+          ctx.arc(toX(p.x), toY(p.y), 3.5, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      }
+
+      // Nose tip
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.6)'
+      const nose = landmarks[1]
+      ctx.beginPath()
+      ctx.arc(toX(nose.x), toY(nose.y), 2.5, 0, Math.PI * 2)
+      ctx.fill()
+    }
   }
 
   buildResult(count, facing, distance, attention, emotion, pose) {
