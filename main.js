@@ -5,25 +5,61 @@ const video = document.getElementById('camera')
 const overlay = document.getElementById('overlay')
 const statusDot = document.getElementById('status-dot')
 
+let currentEngine = null
+let currentStream = null
+
+async function enumerateCameras() {
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  return devices.filter(d => d.kind === 'videoinput')
+}
+
+function populateSelect(selectEl, cameras, currentId) {
+  selectEl.innerHTML = cameras.map((cam, i) =>
+    `<option value="${cam.deviceId}" ${cam.deviceId === currentId ? 'selected' : ''}>${cam.label || `摄像头 ${i + 1}`}</option>`
+  ).join('')
+}
+
+async function startCamera(deviceId) {
+  // Stop previous
+  if (currentStream) {
+    currentStream.getTracks().forEach(t => t.stop())
+  }
+
+  const constraints = {
+    video: {
+      width: 640, height: 480,
+      ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' })
+    }
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia(constraints)
+  currentStream = stream
+  video.srcObject = stream
+  await video.play()
+
+  overlay.width = video.videoWidth || 640
+  overlay.height = video.videoHeight || 480
+
+  return stream
+}
+
 async function init() {
   const startBtn = document.getElementById('start-btn')
   const startOverlay = document.getElementById('start-overlay')
   const app = document.getElementById('app')
-  const cameraSelect = document.getElementById('camera-select')
+  const startSelect = document.getElementById('camera-select')
+  const hudSelect = document.getElementById('camera-switch')
 
-  // Enumerate cameras — need a temp stream first to get labels
+  // Get camera list
   try {
     const tempStream = await navigator.mediaDevices.getUserMedia({ video: true })
     tempStream.getTracks().forEach(t => t.stop())
 
-    const devices = await navigator.mediaDevices.enumerateDevices()
-    const cameras = devices.filter(d => d.kind === 'videoinput')
-
-    cameraSelect.innerHTML = cameras.map((cam, i) =>
-      `<option value="${cam.deviceId}">${cam.label || `摄像头 ${i + 1}`}</option>`
-    ).join('')
+    const cameras = await enumerateCameras()
+    populateSelect(startSelect, cameras)
+    populateSelect(hudSelect, cameras)
   } catch (e) {
-    cameraSelect.innerHTML = '<option value="">默认摄像头</option>'
+    startSelect.innerHTML = '<option value="">默认摄像头</option>'
   }
 
   // Wait for start
@@ -31,37 +67,43 @@ async function init() {
     startBtn.addEventListener('click', resolve, { once: true })
   })
 
-  const selectedDeviceId = cameraSelect.value
+  const selectedDeviceId = startSelect.value
   startOverlay.style.display = 'none'
   app.style.display = 'block'
 
   try {
-    const constraints = {
-      video: {
-        width: 640, height: 480,
-        ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: 'user' })
-      }
+    await startCamera(selectedDeviceId)
+
+    // Sync HUD select
+    if (hudSelect.value !== selectedDeviceId) {
+      hudSelect.value = selectedDeviceId
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia(constraints)
-    video.srcObject = stream
-    await video.play()
-
-    overlay.width = video.videoWidth || 640
-    overlay.height = video.videoHeight || 480
-
-    const engine = new SenseEngine(video, overlay)
-    await engine.init()
+    // Init engine
+    currentEngine = new SenseEngine(video, overlay)
+    await currentEngine.init()
 
     const dashboard = new Dashboard()
 
+    // Loop
     function loop() {
-      const result = engine.detect()
+      const result = currentEngine.detect()
       if (result) dashboard.update(result)
       requestAnimationFrame(loop)
     }
-
     requestAnimationFrame(loop)
+
+    // HUD camera switch — runtime
+    hudSelect.addEventListener('change', async () => {
+      const newId = hudSelect.value
+      try {
+        await startCamera(newId)
+        // Engine keeps working — it reads from the same video element
+        console.log('Switched camera:', newId)
+      } catch (e) {
+        console.error('Camera switch failed:', e)
+      }
+    })
 
   } catch (e) {
     console.error('Init failed:', e)
