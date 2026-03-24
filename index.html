@@ -46,46 +46,37 @@
         <div class="gaze-dot"></div>
       </div>
 
-      <!-- Bottom HUD -->
+      <!-- Bottom HUD — compact single bar -->
       <div class="hud-bottom">
-        <!-- Synthesis -->
-        <div class="synthesis" id="synthesis-text">等待感知...</div>
+        <div class="bottom-bar">
+          <!-- Synthesis text — left -->
+          <div class="synth-text" id="synthesis-text">等待感知...</div>
 
-        <!-- Attention bar -->
-        <div class="attention-wrap">
-          <div class="attention-track">
-            <div class="attention-fill" id="attention-bar"></div>
+          <!-- Sense chips — right -->
+          <div class="sense-chips">
+            <span class="chip" id="s-expr-icon">😐</span>
+            <span class="chip-text" id="s-expression">—</span>
+            <span class="chip-sep">·</span>
+            <span class="chip">👀</span>
+            <span class="chip-text" id="s-gaze">—</span>
+            <span class="chip-sep">·</span>
+            <span class="chip-text" id="s-posture">—</span>
           </div>
-          <span class="attention-label" id="attention-pct">—</span>
         </div>
 
-        <!-- Sense pills row -->
-        <div class="sense-row">
-          <div class="sense-pill">
-            <span class="sp-icon">👀</span>
-            <span class="sp-val" id="s-gaze">—</span>
-          </div>
-          <div class="sense-pill">
-            <span class="sp-icon" id="s-expr-icon">😐</span>
-            <span class="sp-val" id="s-expression">—</span>
-          </div>
-          <div class="sense-pill">
-            <span class="sp-icon">🧍</span>
-            <span class="sp-val" id="s-posture">—</span>
-          </div>
-          <div class="sense-pill">
-            <span class="sp-icon">💧</span>
-            <span class="sp-val" id="s-blink">—</span>
-          </div>
-          <div class="sense-pill">
-            <span class="sp-icon" id="s-facing-icon">🎯</span>
-            <span class="sp-val" id="s-facing">—</span>
-          </div>
-          <div class="sense-pill">
-            <span class="sp-icon">↕️</span>
-            <span class="sp-val" id="s-tilt">—</span>
-          </div>
+        <!-- Attention bar — thin, full width -->
+        <div class="attention-track">
+          <div class="attention-fill" id="attention-bar"></div>
         </div>
+      </div>
+
+      <!-- Hidden elements for data binding (dashboard.js reads these) -->
+      <div style="display:none">
+        <span id="s-blink"></span>
+        <span id="s-facing"></span>
+        <span id="s-facing-icon"></span>
+        <span id="s-tilt"></span>
+        <span id="attention-pct"></span>
       </div>
 
       <!-- Timeline (collapsible, bottom-right) -->
