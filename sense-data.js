@@ -238,8 +238,11 @@ function round(v, d = 4) {
  * @param {object} handResult - GestureRecognizer result (optional)
  * @param {object} poseResult - PoseLandmarker result (optional)
  * @param {object} segResult  - ImageSegmenter result (optional)
+ * @param {object} objectResult - ObjectDetector result (optional)
+ * @param {object} faceDetResult - FaceDetector result (optional)
+ * @param {object} handLmResult - HandLandmarker result (optional, fallback if no gesture)
  */
-export function extractFrame(faceResult, handResult, poseResult, segResult, timestamp) {
+export function extractFrame(faceResult, handResult, poseResult, segResult, objectResult, faceDetResult, handLmResult, timestamp) {
   // ---- Faces ----
   const faces = []
   const faceCount = faceResult?.faceLandmarks ? faceResult.faceLandmarks.length : 0
@@ -250,13 +253,14 @@ export function extractFrame(faceResult, handResult, poseResult, segResult, time
     faces.push(extractFace(landmarks, bs))
   }
 
-  // ---- Hands ----
+  // ---- Hands (from GestureRecognizer) ----
   const hands = []
-  if (handResult?.landmarks) {
-    for (let h = 0; h < handResult.landmarks.length; h++) {
-      const lm = handResult.landmarks[h]
-      const handedness = handResult.handednesses?.[h]?.[0]
-      const gesture = handResult.gestures?.[h]?.[0]
+  const handSource = handResult?.landmarks ? handResult : handLmResult
+  if (handSource?.landmarks) {
+    for (let h = 0; h < handSource.landmarks.length; h++) {
+      const lm = handSource.landmarks[h]
+      const handedness = handSource.handednesses?.[h]?.[0]
+      const gesture = handResult?.gestures?.[h]?.[0]  // only from GestureRecognizer
 
       // Finger states: check if fingertip is above (lower y) its PIP joint
       const fingers = {
@@ -347,6 +351,53 @@ export function extractFrame(faceResult, handResult, poseResult, segResult, time
     }
   }
 
+  // ---- Objects ----
+  const objects = []
+  if (objectResult?.detections) {
+    for (const det of objectResult.detections) {
+      const cat = det.categories?.[0]
+      const bb = det.boundingBox
+      if (cat && bb) {
+        objects.push({
+          label: cat.categoryName,
+          confidence: round(cat.score),
+          box: {
+            x: round(bb.originX),
+            y: round(bb.originY),
+            width: round(bb.width),
+            height: round(bb.height),
+          }
+        })
+      }
+    }
+  }
+
+  // ---- Fast face detection ----
+  let faceDetection = null
+  if (faceDetResult?.detections) {
+    faceDetection = {
+      count: faceDetResult.detections.length,
+      faces: faceDetResult.detections.map(det => {
+        const bb = det.boundingBox
+        const keypoints = det.keypoints || []
+        return {
+          box: bb ? {
+            x: round(bb.originX),
+            y: round(bb.originY),
+            width: round(bb.width),
+            height: round(bb.height),
+          } : null,
+          keypoints: keypoints.map(kp => ({
+            x: round(kp.x),
+            y: round(kp.y),
+            label: kp.label || null,
+          })),
+          confidence: round(det.categories?.[0]?.score || 0),
+        }
+      })
+    }
+  }
+
   return {
     timestamp: timestamp || performance.now(),
     faceCount,
@@ -355,6 +406,9 @@ export function extractFrame(faceResult, handResult, poseResult, segResult, time
     hands,
     body,
     segmentation,
+    objectCount: objects.length,
+    objects,
+    faceDetection,
   }
 }
 

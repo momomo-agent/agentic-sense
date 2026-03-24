@@ -27,13 +27,14 @@ export class Dashboard {
       tilt: document.getElementById('s-tilt'),
       synthesisText: document.getElementById('synthesis-text'),
       timeline: document.getElementById('timeline-entries'),
-      // New: hands & pose
+      // New: hands & pose & objects
       handCount: document.getElementById('s-hand-count'),
       gesture: document.getElementById('s-gesture'),
       fingers: document.getElementById('s-fingers'),
       bodyPosture: document.getElementById('s-body-posture'),
       shoulders: document.getElementById('s-shoulders'),
       personRatio: document.getElementById('s-person-ratio'),
+      objects: document.getElementById('s-objects'),
     }
   }
 
@@ -168,6 +169,14 @@ export class Dashboard {
         this.setText('personRatio', `${(sense.segmentation.personRatio * 100).toFixed(0)}%`)
       } else {
         this.setText('personRatio', '—')
+      }
+
+      // ---- Objects ----
+      if (sense.objects && sense.objects.length > 0) {
+        const objStr = sense.objects.map(o => `${o.label}(${(o.confidence * 100).toFixed(0)}%)`).join(' ')
+        this.setText('objects', objStr)
+      } else {
+        this.setText('objects', '—')
       }
     }
   }

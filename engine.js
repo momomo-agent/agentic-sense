@@ -286,8 +286,11 @@ export class SenseEngine {
 
     this.faceLandmarker = null
     this.gestureRecognizer = null
+    this.handLandmarker = null
     this.poseLandmarker = null
     this.imageSegmenter = null
+    this.objectDetector = null
+    this.faceDetector = null
     this.detector = null  // Chrome FaceDetector fallback
 
     this.blinkDetector = new BlinkDetector()
@@ -304,8 +307,11 @@ export class SenseEngine {
     this.lastResult = null
     this.frameCount = 0
     this.lastHandResult = null
+    this.lastHandLmResult = null
     this.lastPoseResult = null
     this.lastSegResult = null
+    this.lastObjectResult = null
+    this.lastFaceDetResult = null
     this._vision = null  // cached vision module
   }
 
@@ -332,8 +338,11 @@ export class SenseEngine {
 
     // Init additional recognizers in parallel (non-blocking)
     this.initGesture().catch(e => console.warn('GestureRecognizer init failed:', e))
+    this.initHandLandmarker().catch(e => console.warn('HandLandmarker init failed:', e))
     this.initPose().catch(e => console.warn('PoseLandmarker init failed:', e))
     this.initSegmenter().catch(e => console.warn('ImageSegmenter init failed:', e))
+    this.initObjectDetector().catch(e => console.warn('ObjectDetector init failed:', e))
+    this.initFaceDetector().catch(e => console.warn('FaceDetector init failed:', e))
   }
 
   async initMediaPipe() {
@@ -404,6 +413,54 @@ export class SenseEngine {
     console.log('ImageSegmenter ready (selfie segmentation)')
   }
 
+  async initHandLandmarker() {
+    if (!this._vision) return
+    const { HandLandmarker, FilesetResolver } = this._vision
+    if (!HandLandmarker) { console.warn('HandLandmarker not in bundle'); return }
+    const wasmFileset = await FilesetResolver.forVisionTasks('./mediapipe/')
+    this.handLandmarker = await HandLandmarker.createFromOptions(wasmFileset, {
+      baseOptions: {
+        modelAssetPath: './mediapipe/hand_landmarker.task',
+        delegate: 'GPU'
+      },
+      runningMode: 'VIDEO',
+      numHands: 2
+    })
+    console.log('HandLandmarker ready (21 landmarks × 2 hands, no gesture)')
+  }
+
+  async initObjectDetector() {
+    if (!this._vision) return
+    const { ObjectDetector, FilesetResolver } = this._vision
+    if (!ObjectDetector) { console.warn('ObjectDetector not in bundle'); return }
+    const wasmFileset = await FilesetResolver.forVisionTasks('./mediapipe/')
+    this.objectDetector = await ObjectDetector.createFromOptions(wasmFileset, {
+      baseOptions: {
+        modelAssetPath: './mediapipe/efficientdet_lite0.tflite',
+        delegate: 'GPU'
+      },
+      runningMode: 'VIDEO',
+      maxResults: 10,
+      scoreThreshold: 0.3
+    })
+    console.log('ObjectDetector ready (80 COCO classes)')
+  }
+
+  async initFaceDetector() {
+    if (!this._vision) return
+    const { FaceDetector, FilesetResolver } = this._vision
+    if (!FaceDetector) { console.warn('FaceDetector not in bundle'); return }
+    const wasmFileset = await FilesetResolver.forVisionTasks('./mediapipe/')
+    this.faceDetector = await FaceDetector.createFromOptions(wasmFileset, {
+      baseOptions: {
+        modelAssetPath: './mediapipe/blaze_face_short_range.tflite',
+        delegate: 'GPU'
+      },
+      runningMode: 'VIDEO',
+    })
+    console.log('FaceDetector ready (BlazeFace, fast presence check)')
+  }
+
   detect() {
     this.frameCount++
 
@@ -437,6 +494,13 @@ export class SenseEngine {
       } catch (e) { /* skip */ }
     }
 
+    // Hand landmarks only (every frame, if gesture recognizer not available)
+    if (this.handLandmarker && !this.gestureRecognizer) {
+      try {
+        this.lastHandLmResult = this.handLandmarker.detectForVideo(this.video, now)
+      } catch (e) { /* skip */ }
+    }
+
     // Pose landmarks (every 2nd frame to save GPU)
     if (this.poseLandmarker && this.frameCount % 2 === 0) {
       try {
@@ -451,7 +515,21 @@ export class SenseEngine {
       } catch (e) { /* skip */ }
     }
 
-    this.drawOverlay(faceResults, this.lastHandResult, this.lastPoseResult)
+    // Object detection (every 5th frame — supplementary)
+    if (this.objectDetector && this.frameCount % 5 === 0) {
+      try {
+        this.lastObjectResult = this.objectDetector.detectForVideo(this.video, now)
+      } catch (e) { /* skip */ }
+    }
+
+    // Fast face detection (every frame, lightweight)
+    if (this.faceDetector && this.frameCount % 4 === 0) {
+      try {
+        this.lastFaceDetResult = this.faceDetector.detectForVideo(this.video, now)
+      } catch (e) { /* skip */ }
+    }
+
+    this.drawOverlay(faceResults, this.lastHandResult, this.lastPoseResult, this.lastObjectResult)
 
     if (faceCount === 0 && !this.lastHandResult?.landmarks?.length) {
       this.lastResult = this.buildResult(0, false, 0, null, null, null)
@@ -493,7 +571,7 @@ export class SenseEngine {
     }
 
     // ---- Structured sense data (core output) ----
-    const senseFrame = extractFrame(faceResults, this.lastHandResult, this.lastPoseResult, this.lastSegResult)
+    const senseFrame = extractFrame(faceResults, this.lastHandResult, this.lastPoseResult, this.lastSegResult, this.lastObjectResult, this.lastFaceDetResult, this.lastHandLmResult)
 
     this.lastResult = this.buildResult(faceCount, pose.facing, distance,
       { gaze, blinkRate, focus },
@@ -577,7 +655,7 @@ export class SenseEngine {
     return this.lastResult
   }
 
-  drawOverlay(faceResults, handResult, poseResult) {
+  drawOverlay(faceResults, handResult, poseResult, objectResult) {
     const canvas = this.overlay
     const ctx = this.ctx
 
@@ -735,6 +813,33 @@ export class SenseEngine {
           ctx.beginPath()
           ctx.arc(toX(pt.x), toY(pt.y), 3, 0, Math.PI * 2)
           ctx.fill()
+        }
+      }
+    }
+
+    // ---- Object detection overlay ----
+    if (objectResult?.detections) {
+      for (const det of objectResult.detections) {
+        const bb = det.boundingBox
+        if (!bb) continue
+
+        // BoundingBox is in pixel coords (not normalized), need to convert
+        const x1 = toX((bb.originX + bb.width) / vw)
+        const y1 = toY(bb.originY / vh)
+        const x2 = toX(bb.originX / vw)
+        const y2 = toY((bb.originY + bb.height) / vh)
+
+        ctx.strokeStyle = 'rgba(251, 146, 60, 0.6)'  // orange
+        ctx.lineWidth = 1.5
+        ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
+
+        // Label
+        const cat = det.categories?.[0]
+        if (cat) {
+          const label = `${cat.categoryName} ${(cat.score * 100).toFixed(0)}%`
+          ctx.font = '11px "Space Mono", monospace'
+          ctx.fillStyle = 'rgba(251, 146, 60, 0.9)'
+          ctx.fillText(label, Math.min(x1, x2), Math.min(y1, y2) - 4)
         }
       }
     }
