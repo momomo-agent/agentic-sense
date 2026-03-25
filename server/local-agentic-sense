@@ -56,8 +56,8 @@ source "$VENV/bin/activate"
 
 if ! python3 -c "import funasr" 2>/dev/null; then
   echo -e "${Y}⟳${N} Installing dependencies (first run, may take a few minutes)..."
-  pip install -q --upgrade pip
-  pip install -q funasr modelscope torch
+  pip install --upgrade pip
+  pip install funasr modelscope torch
 fi
 echo -e "${G}✓${N} Dependencies ready"
 
