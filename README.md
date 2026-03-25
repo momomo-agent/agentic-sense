@@ -40,6 +40,39 @@ Part of the [agentic.js](https://momomo-agent.github.io/agentic/) family.
 </script>
 ```
 
+### Audio (Speech + Wake Word)
+
+```html
+<script type="module">
+  import { AgenticAudio } from './agentic-audio.js'
+
+  const audio = new AgenticAudio({
+    wakeWords: ['hey momo', 'momo'],
+    workerPath: './whisper-worker.js'
+  })
+
+  audio.onResult = (text, isFinal, judgment) => {
+    console.log(text, judgment.isWake ? 'WAKE' : '')
+  }
+
+  // Connect to AgenticSense for multi-modal wake detection
+  audio.onWake = (word, text, judgment) => {
+    console.log('Wake:', word, judgment.reason)
+  }
+
+  await audio.start()
+
+  // Feed visual context from sense (optional, enhances wake detection)
+  function loop() {
+    const frame = sense.detect()
+    if (frame?.faces?.[0]) {
+      audio.updateVisualContext(frame.faces[0].head.facing)
+    }
+    requestAnimationFrame(loop)
+  }
+</script>
+```
+
 ## API
 
 ### `new AgenticSense(videoElement)`
@@ -85,6 +118,8 @@ Returns:
   }],
   handCount: 0,
   hands: [],
+  customGestures: [],  // [{ hand, name, confidence, emoji }] — OK, Pinch, Rock, One, Peace
+  actions: [],         // [{ hand, name, confidence, emoji }] — Wave, Tap, Push Down, Lift Up, Circle
   body: null,
   segmentation: null,
   objectCount: 0,
@@ -110,6 +145,37 @@ const raw = sense.rawResults
 
 Cleanup all MediaPipe instances.
 
+### `new AgenticAudio(options)`
+
+Create an audio sense instance. Options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `wakeWords` | `['hello','hey momo','momo']` | Wake word list (case insensitive) |
+| `lang` | `'zh-CN'` | Language for transcription |
+| `workerPath` | `'./whisper-worker.js'` | Path to the Whisper Web Worker |
+
+### `audio.start()` → `Promise<boolean>`
+
+Start microphone capture and load Whisper model. Returns `false` if audio not supported.
+
+### `audio.stop()`
+
+Stop capture, terminate worker, release microphone.
+
+### `audio.updateVisualContext(facing)`
+
+Feed camera data for multi-modal wake detection. `facing` is a boolean from `face.head.facing`.
+
+### Callbacks
+
+| Callback | Arguments | Description |
+|----------|-----------|-------------|
+| `onResult` | `(text, isFinal, judgment)` | Speech transcription result |
+| `onWake` | `(wakeWord, fullText, judgment)` | Wake word detected (confidence >= 0.5) |
+| `onVolumeChange` | `(volume)` | Microphone RMS level (0-1) |
+| `onModelStatus` | `(status, message)` | Model loading status (`'loading'`, `'ready'`, `'error'`) |
+
 ## Features
 
 - **478 face landmarks** with iris tracking
@@ -117,10 +183,15 @@ Cleanup all MediaPipe instances.
 - **Interpreted data** — expression, focus, gaze, blink rate, distance
 - **Multi-face** — up to 3 faces simultaneously
 - **Hand tracking** — 21 landmarks per hand, gesture recognition
+- **Custom gestures** — OK, Pinch, Rock, One, Peace (landmark-based fallback)
+- **Action detection** — Wave, Tap, Push Down, Lift Up, Circle (temporal)
+- **Speech recognition** — local Whisper WASM via Web Worker
+- **Wake word detection** — multi-modal fusion (audio + visual context)
 - **Body pose** — 33 skeletal landmarks
 - **Object detection** — 80 COCO classes
 - **Fully local** — zero network requests after model load
 - **Single file** — ~480 lines, zero dependencies
+- **Audio module** — separate file with Web Worker for speech
 
 ## License
 

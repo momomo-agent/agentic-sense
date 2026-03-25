@@ -5,7 +5,12 @@
   "type": "module",
   "main": "agentic-sense.js",
   "browser": "agentic-sense.js",
-  "files": ["agentic-sense.js", "README.md"],
+  "files": ["agentic-sense.js", "agentic-audio.js", "whisper-worker.js", "README.md"],
+  "exports": {
+    ".": "./agentic-sense.js",
+    "./audio": "./agentic-audio.js",
+    "./whisper-worker": "./whisper-worker.js"
+  },
   "keywords": ["mediapipe", "face-detection", "pose-estimation", "hand-tracking", "perception", "computer-vision", "browser", "zero-dependency", "ai", "agent"],
   "license": "MIT",
   "repository": {

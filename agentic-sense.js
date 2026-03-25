@@ -170,6 +170,193 @@ class ExpressionClassifier {
   }
 }
 
+class CustomGestureDetector {
+  constructor() {
+    this.pinchThreshold = 0.3 // normalized by palm width
+  }
+
+  isFingerExtended(landmarks, tipIdx, pipIdx) {
+    return landmarks[tipIdx].y < landmarks[pipIdx].y
+  }
+
+  isThumbExtended(landmarks) {
+    const tip = landmarks[4]
+    const ip = landmarks[3]
+    const mcp = landmarks[2]
+    return Math.abs(tip.x - mcp.x) > Math.abs(ip.x - mcp.x)
+  }
+
+  pinchDistance(landmarks, idxA, idxB) {
+    const a = landmarks[idxA]
+    const b = landmarks[idxB]
+    const palmWidth = Math.hypot(
+      landmarks[5].x - landmarks[17].x,
+      landmarks[5].y - landmarks[17].y
+    )
+    return Math.hypot(a.x - b.x, a.y - b.y) / (palmWidth + 0.001)
+  }
+
+  detect(landmarks) {
+    if (!landmarks || landmarks.length < 21) return null
+
+    const thumb = this.isThumbExtended(landmarks)
+    const index = this.isFingerExtended(landmarks, 8, 6)
+    const middle = this.isFingerExtended(landmarks, 12, 10)
+    const ring = this.isFingerExtended(landmarks, 16, 14)
+    const pinky = this.isFingerExtended(landmarks, 20, 18)
+
+    const thumbIndexDist = this.pinchDistance(landmarks, 4, 8)
+    const isPinching = thumbIndexDist < this.pinchThreshold
+
+    if (isPinching && middle && ring && pinky) {
+      return { name: 'OK', confidence: 0.8, emoji: '👌' }
+    }
+    if (isPinching && !middle && !ring && !pinky) {
+      return { name: 'Pinch', confidence: 0.8, emoji: '🤏' }
+    }
+    if (index && pinky && !middle && !ring) {
+      return { name: 'Rock', confidence: 0.75, emoji: '🤟' }
+    }
+    if (index && !middle && !ring && !pinky && !thumb) {
+      return { name: 'One', confidence: 0.7, emoji: '☝️' }
+    }
+    if (index && middle && !ring && !pinky) {
+      return { name: 'Peace', confidence: 0.75, emoji: '✌️' }
+    }
+
+    return null
+  }
+}
+
+class ActionDetector {
+  constructor() {
+    this.bufferSize = 30
+    this.handHistory = {}
+    this.cooldowns = {}
+    this.cooldownMs = 500
+  }
+
+  addFrame(handIdx, wrist, indexTip, palmCenter, timestamp) {
+    if (!this.handHistory[handIdx]) {
+      this.handHistory[handIdx] = []
+    }
+    const buf = this.handHistory[handIdx]
+    buf.push({ wrist, indexTip, palmCenter, timestamp })
+    if (buf.length > this.bufferSize) buf.shift()
+  }
+
+  canFire(action) {
+    const last = this.cooldowns[action] || 0
+    return (performance.now() - last) > this.cooldownMs
+  }
+
+  fire(action) {
+    this.cooldowns[action] = performance.now()
+  }
+
+  detect(handIdx) {
+    const buf = this.handHistory[handIdx]
+    if (!buf || buf.length < 5) return []
+
+    const actions = []
+    const now = buf[buf.length - 1].timestamp
+
+    // Wave — wrist x reversals >= 2 in last 1s
+    if (this.canFire('Wave')) {
+      const recent = buf.filter(f => (now - f.timestamp) < 1000)
+      if (recent.length >= 5) {
+        let reversals = 0
+        let lastDir = 0
+        for (let i = 1; i < recent.length; i++) {
+          const dx = recent[i].wrist.x - recent[i - 1].wrist.x
+          if (Math.abs(dx) > 0.005) {
+            const dir = dx > 0 ? 1 : -1
+            if (lastDir !== 0 && dir !== lastDir) reversals++
+            lastDir = dir
+          }
+        }
+        const totalDx = recent.reduce((sum, f, i) => {
+          if (i === 0) return 0
+          return sum + Math.abs(f.wrist.x - recent[i - 1].wrist.x)
+        }, 0)
+        if (reversals >= 2 && totalDx > 0.08) {
+          actions.push({ name: 'Wave', emoji: '👋', confidence: 0.7 })
+          this.fire('Wave')
+        }
+      }
+    }
+
+    // Tap — index z drops then rebounds
+    if (this.canFire('Tap')) {
+      const last5 = buf.slice(-5)
+      if (last5.length >= 5) {
+        const zVals = last5.map(f => f.indexTip.z)
+        const minZ = Math.min(...zVals)
+        const startZ = zVals[0]
+        const endZ = zVals[zVals.length - 1]
+        if (startZ - minZ > 0.03 && endZ - minZ > 0.02) {
+          actions.push({ name: 'Tap', emoji: '☝️', confidence: 0.65 })
+          this.fire('Tap')
+        }
+      }
+    }
+
+    // Push Down — palm y increases rapidly
+    if (this.canFire('Push Down')) {
+      const recent = buf.slice(-8)
+      if (recent.length >= 6) {
+        const dy = recent[recent.length - 1].palmCenter.y - recent[0].palmCenter.y
+        const dt = recent[recent.length - 1].timestamp - recent[0].timestamp
+        if (dy > 0.08 && dt < 500 && dt > 0) {
+          actions.push({ name: 'Push Down', emoji: '🫳', confidence: 0.7 })
+          this.fire('Push Down')
+        }
+      }
+    }
+
+    // Lift Up — palm y decreases rapidly
+    if (this.canFire('Lift Up')) {
+      const recent = buf.slice(-8)
+      if (recent.length >= 6) {
+        const dy = recent[recent.length - 1].palmCenter.y - recent[0].palmCenter.y
+        const dt = recent[recent.length - 1].timestamp - recent[0].timestamp
+        if (dy < -0.08 && dt < 500 && dt > 0) {
+          actions.push({ name: 'Lift Up', emoji: '🫴', confidence: 0.7 })
+          this.fire('Lift Up')
+        }
+      }
+    }
+
+    // Circle — index tip angle accumulates >= 360deg
+    if (this.canFire('Circle')) {
+      const recent = buf.filter(f => (now - f.timestamp) < 1500)
+      if (recent.length >= 10) {
+        const cx = recent.reduce((s, f) => s + f.indexTip.x, 0) / recent.length
+        const cy = recent.reduce((s, f) => s + f.indexTip.y, 0) / recent.length
+        let totalAngle = 0
+        for (let i = 1; i < recent.length; i++) {
+          const a1 = Math.atan2(recent[i - 1].indexTip.y - cy, recent[i - 1].indexTip.x - cx)
+          const a2 = Math.atan2(recent[i].indexTip.y - cy, recent[i].indexTip.x - cx)
+          let da = a2 - a1
+          if (da > Math.PI) da -= 2 * Math.PI
+          if (da < -Math.PI) da += 2 * Math.PI
+          totalAngle += da
+        }
+        if (Math.abs(totalAngle) >= 2 * Math.PI) {
+          actions.push({ name: 'Circle', emoji: '🔄', confidence: 0.65 })
+          this.fire('Circle')
+        }
+      }
+    }
+
+    return actions
+  }
+
+  reset() {
+    this.handHistory = {}
+  }
+}
+
 // ════════════════════════════════════════════
 // Frame extraction (from MediaPipe results → structured data)
 // ════════════════════════════════════════════
@@ -301,6 +488,8 @@ export class AgenticSense {
     this._gaze = new GazeEstimator()
     this._focus = new FocusScorer()
     this._expression = new ExpressionClassifier()
+    this._customGesture = new CustomGestureDetector()
+    this._actionDetector = new ActionDetector()
     this._yawEMA = new EMA(0.2)
     this._pitchEMA = new EMA(0.2)
     this._distEMA = new EMA(0.15)
@@ -427,6 +616,35 @@ export class AgenticSense {
 
     // Build raw sense frame
     const raw = extractFrame(faceResults, this._lastHand, this._lastPose, this._lastSeg, this._lastObject, null, this._lastHandLm)
+
+    // Enrich hands with custom gestures and actions
+    const customGestures = []
+    const actions = []
+    for (let h = 0; h < raw.hands.length; h++) {
+      const hand = raw.hands[h]
+      // Custom gesture: use if GestureRecognizer returned None
+      const cg = this._customGesture.detect(hand.landmarks)
+      if (cg) {
+        if (!hand.gesture) {
+          hand.gesture = cg.name
+          hand.gestureConfidence = cg.confidence
+        }
+        customGestures.push({ hand: h, ...cg })
+      }
+
+      // Action detection
+      const lm = hand.landmarks
+      const wrist = lm[0]
+      const indexTip = lm[8]
+      const palmCenter = { x: (lm[0].x + lm[5].x + lm[17].x) / 3, y: (lm[0].y + lm[5].y + lm[17].y) / 3, z: (lm[0].z + lm[5].z + lm[17].z) / 3 }
+      this._actionDetector.addFrame(h, wrist, indexTip, palmCenter, now)
+      const handActions = this._actionDetector.detect(h)
+      for (const a of handActions) {
+        actions.push({ hand: h, ...a })
+      }
+    }
+    raw.customGestures = customGestures
+    raw.actions = actions
 
     // Enrich primary face with interpreted data
     if (raw.faceCount > 0) {
