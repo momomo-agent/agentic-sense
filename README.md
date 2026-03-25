@@ -44,11 +44,10 @@ Part of the [agentic.js](https://momomo-agent.github.io/agentic/) family.
 
 ```html
 <script type="module">
-  import { AgenticAudio } from './agentic-audio.js'
+  import { AgenticAudio } from './agentic-sense.js'
 
   const audio = new AgenticAudio({
     wakeWords: ['hey momo', 'momo'],
-    workerPath: './whisper-worker.js'
   })
 
   audio.onResult = (text, isFinal, judgment) => {
@@ -153,7 +152,6 @@ Create an audio sense instance. Options:
 |--------|---------|-------------|
 | `wakeWords` | `['hello','hey momo','momo']` | Wake word list (case insensitive) |
 | `lang` | `'zh-CN'` | Language for transcription |
-| `workerPath` | `'./whisper-worker.js'` | Path to the Whisper Web Worker |
 
 ### `audio.start()` → `Promise<boolean>`
 
