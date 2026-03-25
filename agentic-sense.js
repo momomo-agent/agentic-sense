@@ -730,6 +730,8 @@ export class AgenticAudio {
     this.wakeWords = (options.wakeWords || ['hello', 'hey momo', 'momo'])
       .map(w => w.toLowerCase())
     this.lang = options.lang || 'zh-CN'
+    this.serverUrl = options.serverUrl || null  // e.g. 'http://localhost:18906'
+    this._backend = null  // 'sensevoice' | 'whisper'
 
     // Callbacks
     this.onResult = null      // (text, isFinal, wakeJudgment)
@@ -766,11 +768,34 @@ export class AgenticAudio {
   async start() {
     this._stopped = false
 
-    // Inline Worker via Blob URL
-    const blob = new Blob([WHISPER_WORKER_CODE], { type: 'application/javascript' })
-    this.worker = new Worker(URL.createObjectURL(blob), { type: 'module' })
-    this.worker.onmessage = (e) => this._handleWorkerMessage(e)
-    this.worker.postMessage({ type: 'init' })
+    // Auto-detect SenseVoice server
+    const serverCandidates = this.serverUrl
+      ? [this.serverUrl]
+      : ['http://localhost:18906', 'http://127.0.0.1:18906']
+
+    for (const url of serverCandidates) {
+      try {
+        const r = await fetch(url + '/health', { signal: AbortSignal.timeout(1000) })
+        if (r.ok) {
+          this.serverUrl = url
+          this._backend = 'sensevoice'
+          this._modelReady = true
+          if (this.onModelStatus) this.onModelStatus('ready', `SenseVoice (${url})`)
+          console.log(`[AgenticAudio] Using SenseVoice: ${url}`)
+          break
+        }
+      } catch {}
+    }
+
+    // Fallback to Whisper WASM
+    if (!this._backend) {
+      this._backend = 'whisper'
+      const blob = new Blob([WHISPER_WORKER_CODE], { type: 'application/javascript' })
+      this.worker = new Worker(URL.createObjectURL(blob), { type: 'module' })
+      this.worker.onmessage = (e) => this._handleWorkerMessage(e)
+      this.worker.postMessage({ type: 'init' })
+      console.log('[AgenticAudio] Using Whisper WASM (no SenseVoice server found)')
+    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -822,9 +847,65 @@ export class AgenticAudio {
     const merged = new Float32Array(totalLength)
     let offset = 0
     for (const chunk of this.audioChunks) { merged.set(chunk, offset); offset += chunk.length }
-    this.worker.postMessage({ type: 'transcribe', audio: merged, isFinal }, [merged.buffer])
+
+    if (this._backend === 'sensevoice') {
+      // Convert Float32 PCM to WAV and POST to server
+      this._sendToSenseVoice(merged)
+    } else {
+      this.worker.postMessage({ type: 'transcribe', audio: merged, isFinal }, [merged.buffer])
+    }
+
     if (isFinal) this.audioChunks = []
     this.lastChunkTime = Date.now()
+  }
+
+  async _sendToSenseVoice(pcm) {
+    // Encode Float32 PCM → 16-bit WAV
+    const numSamples = pcm.length
+    const buffer = new ArrayBuffer(44 + numSamples * 2)
+    const view = new DataView(buffer)
+    // WAV header
+    const writeStr = (off, str) => { for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i)) }
+    writeStr(0, 'RIFF')
+    view.setUint32(4, 36 + numSamples * 2, true)
+    writeStr(8, 'WAVE')
+    writeStr(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)      // PCM
+    view.setUint16(22, 1, true)      // mono
+    view.setUint32(24, 16000, true)   // sample rate
+    view.setUint32(28, 32000, true)   // byte rate
+    view.setUint16(32, 2, true)      // block align
+    view.setUint16(34, 16, true)     // bits per sample
+    writeStr(36, 'data')
+    view.setUint32(40, numSamples * 2, true)
+    for (let i = 0; i < numSamples; i++) {
+      const s = Math.max(-1, Math.min(1, pcm[i]))
+      view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true)
+    }
+
+    try {
+      const res = await fetch(this.serverUrl + '/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/wav' },
+        body: new Uint8Array(buffer),
+      })
+      const data = await res.json()
+      if (data.text) {
+        this._handleTranscription(data.text)
+      }
+    } catch (e) {
+      console.warn('[AgenticAudio] SenseVoice request failed:', e.message)
+    }
+  }
+
+  _handleTranscription(text) {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const judgment = this._judgeWake(trimmed.toLowerCase(), trimmed, true)
+    this._lastSpeechTime = Date.now()
+    if (this.onResult) this.onResult(trimmed, true, judgment)
+    if (judgment.isWake && this.onWake) this.onWake(judgment.wakeWord, trimmed, judgment)
   }
 
   _handleWorkerMessage(e) {
@@ -834,12 +915,7 @@ export class AgenticAudio {
       if (this.onModelStatus) this.onModelStatus(status, message)
     }
     if (type === 'result') {
-      const trimmed = (text || '').trim()
-      if (!trimmed) return
-      const judgment = this._judgeWake(trimmed.toLowerCase(), trimmed, true)
-      this._lastSpeechTime = Date.now()
-      if (this.onResult) this.onResult(trimmed, true, judgment)
-      if (judgment.isWake && this.onWake) this.onWake(judgment.wakeWord, trimmed, judgment)
+      this._handleTranscription(text || '')
     }
   }
 

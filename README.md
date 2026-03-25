@@ -152,10 +152,21 @@ Create an audio sense instance. Options:
 |--------|---------|-------------|
 | `wakeWords` | `['hello','hey momo','momo']` | Wake word list (case insensitive) |
 | `lang` | `'zh-CN'` | Language for transcription |
+| `serverUrl` | `null` | SenseVoice server URL (auto-detects `localhost:18906` if not set) |
 
 ### `audio.start()` → `Promise<boolean>`
 
-Start microphone capture and load Whisper model. Returns `false` if audio not supported.
+Start microphone capture. Auto-detects a local SenseVoice server — if found, uses it (fast + accurate). Otherwise falls back to Whisper WASM in browser (slower, works anywhere).
+
+### SenseVoice Server (optional, recommended)
+
+For much faster and more accurate Chinese speech recognition, run the SenseVoice server locally:
+
+```bash
+cd server && ./setup.sh
+```
+
+This installs SenseVoice (~900MB model, first-run only) and starts a server on port 18906. Auto-detects Apple MPS / NVIDIA CUDA / CPU.
 
 ### `audio.stop()`
 
@@ -183,7 +194,7 @@ Feed camera data for multi-modal wake detection. `facing` is a boolean from `fac
 - **Hand tracking** — 21 landmarks per hand, gesture recognition
 - **Custom gestures** — OK, Pinch, Rock, One, Peace (landmark-based fallback)
 - **Action detection** — Wave, Tap, Push Down, Lift Up, Circle (temporal)
-- **Speech recognition** — local Whisper WASM via Web Worker
+- **Speech recognition** — SenseVoice server (fast, auto-detected) or Whisper WASM fallback (works anywhere)
 - **Wake word detection** — multi-modal fusion (audio + visual context)
 - **Body pose** — 33 skeletal landmarks
 - **Object detection** — 80 COCO classes
