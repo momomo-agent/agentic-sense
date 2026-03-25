@@ -1,0 +1,15 @@
+{
+  "name": "agentic-sense",
+  "version": "0.1.0",
+  "description": "Human perception for AI agents — face, hands, pose, objects. Zero dependencies, browser-first.",
+  "type": "module",
+  "main": "agentic-sense.js",
+  "browser": "agentic-sense.js",
+  "files": ["agentic-sense.js", "README.md"],
+  "keywords": ["mediapipe", "face-detection", "pose-estimation", "hand-tracking", "perception", "computer-vision", "browser", "zero-dependency", "ai", "agent"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/momomo-agent/agentic-sense.git"
+  }
+}
