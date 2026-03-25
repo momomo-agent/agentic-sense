@@ -175,15 +175,27 @@ class CustomGestureDetector {
     this.pinchThreshold = 0.3 // normalized by palm width
   }
 
-  isFingerExtended(landmarks, tipIdx, pipIdx) {
-    return landmarks[tipIdx].y < landmarks[pipIdx].y
+  /**
+   * Check if finger is extended using distance ratio (orientation-independent).
+   * Compares tip-to-mcp distance vs pip-to-mcp distance.
+   * Extended finger: tip is farther from MCP than PIP is.
+   */
+  isFingerExtended(landmarks, tipIdx, pipIdx, mcpIdx) {
+    const tip = landmarks[tipIdx]
+    const pip = landmarks[pipIdx]
+    const mcp = landmarks[mcpIdx]
+    const tipDist = Math.hypot(tip.x - mcp.x, tip.y - mcp.y, tip.z - mcp.z)
+    const pipDist = Math.hypot(pip.x - mcp.x, pip.y - mcp.y, pip.z - mcp.z)
+    return tipDist > pipDist * 1.1 // 10% margin
   }
 
   isThumbExtended(landmarks) {
     const tip = landmarks[4]
     const ip = landmarks[3]
     const mcp = landmarks[2]
-    return Math.abs(tip.x - mcp.x) > Math.abs(ip.x - mcp.x)
+    const tipDist = Math.hypot(tip.x - mcp.x, tip.y - mcp.y, tip.z - mcp.z)
+    const ipDist = Math.hypot(ip.x - mcp.x, ip.y - mcp.y, ip.z - mcp.z)
+    return tipDist > ipDist * 1.1
   }
 
   pinchDistance(landmarks, idxA, idxB) {
@@ -199,11 +211,12 @@ class CustomGestureDetector {
   detect(landmarks) {
     if (!landmarks || landmarks.length < 21) return null
 
+    // MCP indices: index=5, middle=9, ring=13, pinky=17
     const thumb = this.isThumbExtended(landmarks)
-    const index = this.isFingerExtended(landmarks, 8, 6)
-    const middle = this.isFingerExtended(landmarks, 12, 10)
-    const ring = this.isFingerExtended(landmarks, 16, 14)
-    const pinky = this.isFingerExtended(landmarks, 20, 18)
+    const index = this.isFingerExtended(landmarks, 8, 6, 5)
+    const middle = this.isFingerExtended(landmarks, 12, 10, 9)
+    const ring = this.isFingerExtended(landmarks, 16, 14, 13)
+    const pinky = this.isFingerExtended(landmarks, 20, 18, 17)
 
     const thumbIndexDist = this.pinchDistance(landmarks, 4, 8)
     const isPinching = thumbIndexDist < this.pinchThreshold
@@ -490,6 +503,7 @@ export class AgenticSense {
     this._expression = new ExpressionClassifier()
     this._customGesture = new CustomGestureDetector()
     this._actionDetector = new ActionDetector()
+    this._palmStability = {} // hand index → { gesture, startTime, positions[] }
     this._yawEMA = new EMA(0.2)
     this._pitchEMA = new EMA(0.2)
     this._distEMA = new EMA(0.15)
@@ -630,6 +644,42 @@ export class AgenticSense {
           hand.gestureConfidence = cg.confidence
         }
         customGestures.push({ hand: h, ...cg })
+      }
+
+      // Palm stability filter: Open_Palm needs 500ms hold + low movement
+      if (hand.gesture === 'Open_Palm') {
+        const ps = this._palmStability[h]
+        const wrist = hand.wrist
+        if (ps && ps.gesture === 'Open_Palm') {
+          // Check movement (jitter)
+          const lastPos = ps.positions[ps.positions.length - 1]
+          const drift = Math.hypot(wrist.x - lastPos.x, wrist.y - lastPos.y)
+          ps.positions.push({ x: wrist.x, y: wrist.y })
+          if (ps.positions.length > 15) ps.positions.shift()
+          const totalDrift = ps.positions.reduce((sum, p, i) => {
+            if (i === 0) return 0
+            return sum + Math.hypot(p.x - ps.positions[i-1].x, p.y - ps.positions[i-1].y)
+          }, 0)
+
+          if (totalDrift > 0.15) {
+            // Too much movement — not intentional palm
+            hand.gesture = null
+            hand.gestureConfidence = null
+          } else if (now - ps.startTime < 500) {
+            // Not held long enough yet — suppress
+            hand.gesture = null
+            hand.gestureConfidence = null
+          }
+          // else: held 500ms + stable → keep Open_Palm
+        } else {
+          // First frame of Open_Palm — start tracking, suppress for now
+          this._palmStability[h] = { gesture: 'Open_Palm', startTime: now, positions: [{ x: wrist.x, y: wrist.y }] }
+          hand.gesture = null
+          hand.gestureConfidence = null
+        }
+      } else {
+        // Not Open_Palm — reset tracker
+        this._palmStability[h] = null
       }
 
       // Action detection
