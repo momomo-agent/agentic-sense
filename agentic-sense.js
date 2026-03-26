@@ -1,3 +1,10 @@
+;(function(root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory()
+  else if (typeof define === 'function' && define.amd) define(factory)
+  else { var e = factory(); for (var k in e) root[k] = e[k] }
+})(typeof globalThis !== 'undefined' ? globalThis : typeof self !== 'undefined' ? self : this, function() {
+  'use strict'
+
 /**
  * agentic-sense.js — Human perception for AI agents
  * 
@@ -481,7 +488,7 @@ function extractFrame(faceResult, handResult, poseResult, segResult, objectResul
 // AgenticSense — main class
 // ════════════════════════════════════════════
 
-export class AgenticSense {
+class AgenticSense {
   static get VERSION() { return '0.1.0' }
 
   constructor(videoElement, options = {}) {
@@ -775,7 +782,7 @@ self.onmessage = async (e) => {
 };
 `
 
-export class AgenticAudio {
+class AgenticAudio {
   constructor(options = {}) {
     this.wakeWords = (options.wakeWords || ['hello', 'hey momo', 'momo'])
       .map(w => w.toLowerCase())
@@ -1020,4 +1027,6 @@ export class AgenticAudio {
   }
 }
 
-export { IDX, extractFrame }
+
+  return { AgenticSense, AgenticAudio, IDX, extractFrame }
+})

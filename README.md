@@ -10,8 +10,9 @@ Part of the [agentic.js](https://momomo-agent.github.io/agentic/) family.
 
 ```html
 <video id="cam" autoplay playsinline muted></video>
-<script type="module">
-  import { AgenticSense } from './agentic-sense.js'
+<script src="./agentic-sense.js"></script>
+<script>
+  const { AgenticSense } = window
 
   const video = document.getElementById('cam')
   const stream = await navigator.mediaDevices.getUserMedia({ video: true })
@@ -43,8 +44,9 @@ Part of the [agentic.js](https://momomo-agent.github.io/agentic/) family.
 ### Audio (Speech + Wake Word)
 
 ```html
-<script type="module">
-  import { AgenticAudio } from './agentic-sense.js'
+<script src="./agentic-sense.js"></script>
+<script>
+  const { AgenticAudio } = window
 
   const audio = new AgenticAudio({
     wakeWords: ['hey momo', 'momo'],
