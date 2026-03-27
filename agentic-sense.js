@@ -532,7 +532,7 @@ class AgenticSense {
   async init(opts = {}) {
     const { wasmPath = './mediapipe/', face = true, hands = false, pose = false, segment = false, objects = false } = opts
 
-    const vision = await import(wasmPath + 'vision_bundle.mjs')
+    const vision = await import(/* @vite-ignore */ wasmPath + 'vision_bundle.mjs')
     this._vision = vision
     const { FilesetResolver } = vision
     const wasm = await FilesetResolver.forVisionTasks(wasmPath)
